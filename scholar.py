@@ -30,6 +30,7 @@ import optparse
 import os
 import sys
 import re
+import functools
 
 try:
     # Try importing for Python 3
@@ -968,14 +969,17 @@ class ScholarQuerier(object):
             return None
 
 
-def get_pdfs_by_authors(authors, num_entries=20):
+def get_pdfs_by_authors(authors, num_entries=20, search_type='or'):
     '''
     authors: 著者名のリスト
     num_entries: 各著者について、検索して持ってくるエントリー数
+    search_type: 検索方式(and(AND検索)かor(OR検索))
     -> 著者名がauthorsに含まれるPDFへのURLのリスト
     '''
     if num_entries < 0:
         num_entries = 0
+    if search_type not in ['or', 'and']:
+        search_type = 'or'
 
     MAX_PAGE_RESULTS = ScholarConf.MAX_PAGE_RESULTS
 
@@ -987,7 +991,7 @@ def get_pdfs_by_authors(authors, num_entries=20):
     for author in authors:
         query = SearchScholarQuery()
         query.set_author(author)
-        search_results[author] = []
+        search_results[author] = set()
 
         for i in range((num_entries-1) // MAX_PAGE_RESULTS + 1):
             query.set_start(i * MAX_PAGE_RESULTS)
@@ -997,11 +1001,18 @@ def get_pdfs_by_authors(authors, num_entries=20):
                 if article['url_pdf'] is not None:
                     cluster_id = article['cluster_id']
                     url_pdf = article['url_pdf']
-                    search_results[author].append((cluster_id, url_pdf))
+                    search_results[author].add(url_pdf)
             if len(querier.articles) < MAX_PAGE_RESULTS:
                 break
 
-    return search_results
+    if search_type == 'or':
+        def reduce_func(x, y):
+            return x | y
+    elif search_type == 'and':
+        def reduce_func(x, y):
+            return x & y
+
+    return list(functools.reduce(reduce_func, search_results.values()))
 
 
 if __name__ == "__main__":
