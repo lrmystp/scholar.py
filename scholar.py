@@ -968,9 +968,14 @@ class ScholarQuerier(object):
             return None
 
 
-def get_pdfs_by_authors(authors, search_type='or'):
-    if search_type not in ['and', 'or']:
-        search_type = 'or'
+def get_pdfs_by_authors(authors, num_entries=20):
+    '''
+    authors: 著者名のリスト
+    num_entries: 各著者について、検索して持ってくるエントリー数
+    -> 著者名がauthorsに含まれるPDFへのURLのリスト
+    '''
+    if num_entries < 0:
+        num_entries = 0
 
     querier = ScholarQuerier()
     authors = set(authors)
