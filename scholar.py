@@ -230,7 +230,7 @@ class ScholarArticleParser(object):
         content as needed, and notifies the parser instance of
         resulting instances via the handle_article callback.
         """
-        self.soup = BeautifulSoup(html)
+        self.soup = BeautifulSoup(html, 'html.parser')
 
         # This parses any global, non-itemized attributes from the page.
         self._parse_globals()
@@ -271,6 +271,7 @@ class ScholarArticleParser(object):
         self.article = ScholarArticle()
 
         for tag in div:
+            print(tag)
             if not hasattr(tag, 'name'):
                 continue
 
@@ -464,6 +465,20 @@ class ScholarArticleParser120726(ScholarArticleParser):
                         raw_text = raw_text.replace('\n', '')
                         self.article['excerpt'] = raw_text
 
+            # there may be HTML element like below in each articles (sometimes this does not exist)
+            # 
+            # <div class="gs_md_wp gs_ttss" id="gs_ggsW[0-9]*">
+            #     <a href="`data url`" data-clk="`queries`">
+            #         <span class="gs_ggsL">nature.com の <span class="gs_ctg2">[`(HTML|PDF)`]</span></span>
+            #         <span class="gs_ggsS">nature.com <span class="gs_ctg2">[`(HTML|PDF)`]</span></span>
+            #     </a>
+            # </div>
+            file_html = tag.find('div', {'id': re.compile('^gs_ggsW')})
+            if file_html:
+                file_type_html = file_html.find(class_='gs_ctg2')
+                if file_type_html and file_type_html.text == '[PDF]':
+                    self.article['url_pdf'] = file_html.a['href']
+
 
 class ScholarQuery(object):
     """
@@ -596,7 +611,8 @@ class SearchScholarQuery(ScholarQuery):
         + '&as_sdt=%(patents)s%%2C5' \
         + '&as_vis=%(citations)s' \
         + '&btnG=&hl=en' \
-        + '&num=%(num)s'
+        + '&num=%(num)s' \
+        + '&start=%(start)s' \
 
     def __init__(self):
         ScholarQuery.__init__(self)
@@ -611,6 +627,8 @@ class SearchScholarQuery(ScholarQuery):
         self.timeframe = [None, None]
         self.include_patents = True
         self.include_citations = True
+        self.words = None # The default search behavior
+        self.start = None
 
     def set_words(self, words):
         """Sets words that *all* must be found in the result."""
@@ -660,6 +678,11 @@ class SearchScholarQuery(ScholarQuery):
     def set_include_patents(self, yesorno):
         self.include_patents = yesorno
 
+    def set_start(self, num):
+        if not isinstance(num, int):
+            return
+        self.start = num
+
     def get_url(self):
         if self.words is None and self.words_some is None \
            and self.words_none is None and self.phrase is None \
@@ -691,7 +714,9 @@ class SearchScholarQuery(ScholarQuery):
                    'yhi': self.timeframe[1] or '',
                    'patents': '0' if self.include_patents else '1',
                    'citations': '0' if self.include_citations else '1',
-                   'num': self.num_results or ScholarConf.MAX_PAGE_RESULTS}
+                   'num': self.num_results or ScholarConf.MAX_PAGE_RESULTS,
+                   'start': self.start or '',
+                   }
 
         for key, val in urlargs.items():
             urlargs[key] = quote(encode(val))
@@ -943,204 +968,38 @@ class ScholarQuerier(object):
             return None
 
 
-def txt(querier, with_globals):
-    if with_globals:
-        # If we have any articles, check their attribute labels to get
-        # the maximum length -- makes for nicer alignment.
-        max_label_len = 0
-        if len(querier.articles) > 0:
-            items = sorted(list(querier.articles[0].attrs.values()),
-                           key=lambda item: item[2])
-            max_label_len = max([len(str(item[1])) for item in items])
-
-        # Get items sorted in specified order:
-        items = sorted(list(querier.query.attrs.values()), key=lambda item: item[2])
-        # Find largest label length:
-        max_label_len = max([len(str(item[1])) for item in items] + [max_label_len])
-        fmt = '[G] %%%ds %%s' % max(0, max_label_len-4)
-        for item in items:
-            if item[0] is not None:
-                print(fmt % (item[1], item[0]))
-        if len(items) > 0:
-            print
-
-    articles = querier.articles
-    for art in articles:
-        print(encode(art.as_txt()) + '\n')
-
-def csv(querier, header=False, sep='|'):
-    articles = querier.articles
-    for art in articles:
-        result = art.as_csv(header=header, sep=sep)
-        print(encode(result))
-        header = False
-
-def citation_export(querier):
-    articles = querier.articles
-    for art in articles:
-        print(art.as_citation() + '\n')
-
-
-def main():
-    usage = """scholar.py [options] <query string>
-A command-line interface to Google Scholar.
-
-Examples:
-
-# Retrieve one article written by Einstein on quantum theory:
-scholar.py -c 1 --author "albert einstein" --phrase "quantum theory"
-
-# Retrieve a BibTeX entry for that quantum theory paper:
-scholar.py -c 1 -C 17749203648027613321 --citation bt
-
-# Retrieve five articles written by Einstein after 1970 where the title
-# does not contain the words "quantum" and "theory":
-scholar.py -c 5 -a "albert einstein" -t --none "quantum theory" --after 1970"""
-
-    fmt = optparse.IndentedHelpFormatter(max_help_position=50, width=100)
-    parser = optparse.OptionParser(usage=usage, formatter=fmt)
-    group = optparse.OptionGroup(parser, 'Query arguments',
-                                 'These options define search query arguments and parameters.')
-    group.add_option('-a', '--author', metavar='AUTHORS', default=None,
-                     help='Author name(s)')
-    group.add_option('-A', '--all', metavar='WORDS', default=None, dest='allw',
-                     help='Results must contain all of these words')
-    group.add_option('-s', '--some', metavar='WORDS', default=None,
-                     help='Results must contain at least one of these words. Pass arguments in form -s "foo bar baz" for simple words, and -s "a phrase, another phrase" for phrases')
-    group.add_option('-n', '--none', metavar='WORDS', default=None,
-                     help='Results must contain none of these words. See -s|--some re. formatting')
-    group.add_option('-p', '--phrase', metavar='PHRASE', default=None,
-                     help='Results must contain exact phrase')
-    group.add_option('-t', '--title-only', action='store_true', default=False,
-                     help='Search title only')
-    group.add_option('-P', '--pub', metavar='PUBLICATIONS', default=None,
-                     help='Results must have appeared in this publication')
-    group.add_option('--after', metavar='YEAR', default=None,
-                     help='Results must have appeared in or after given year')
-    group.add_option('--before', metavar='YEAR', default=None,
-                     help='Results must have appeared in or before given year')
-    group.add_option('--no-patents', action='store_true', default=False,
-                     help='Do not include patents in results')
-    group.add_option('--no-citations', action='store_true', default=False,
-                     help='Do not include citations in results')
-    group.add_option('-C', '--cluster-id', metavar='CLUSTER_ID', default=None,
-                     help='Do not search, just use articles in given cluster ID')
-    group.add_option('-c', '--count', type='int', default=None,
-                     help='Maximum number of results')
-    parser.add_option_group(group)
-
-    group = optparse.OptionGroup(parser, 'Output format',
-                                 'These options control the appearance of the results.')
-    group.add_option('--txt', action='store_true',
-                     help='Print article data in text format (default)')
-    group.add_option('--txt-globals', action='store_true',
-                     help='Like --txt, but first print global results too')
-    group.add_option('--csv', action='store_true',
-                     help='Print article data in CSV form (separator is "|")')
-    group.add_option('--csv-header', action='store_true',
-                     help='Like --csv, but print header with column names')
-    group.add_option('--citation', metavar='FORMAT', default=None,
-                     help='Print article details in standard citation format. Argument Must be one of "bt" (BibTeX), "en" (EndNote), "rm" (RefMan), or "rw" (RefWorks).')
-    parser.add_option_group(group)
-
-    group = optparse.OptionGroup(parser, 'Miscellaneous')
-    group.add_option('--cookie-file', metavar='FILE', default=None,
-                     help='File to use for cookie storage. If given, will read any existing cookies if found at startup, and save resulting cookies in the end.')
-    group.add_option('-d', '--debug', action='count', default=0,
-                     help='Enable verbose logging to stderr. Repeated options increase detail of debug output.')
-    group.add_option('-v', '--version', action='store_true', default=False,
-                     help='Show version information')
-    parser.add_option_group(group)
-
-    options, _ = parser.parse_args()
-
-    # Show help if we have neither keyword search nor author name
-    if len(sys.argv) == 1:
-        parser.print_help()
-        return 1
-
-    if options.debug > 0:
-        options.debug = min(options.debug, ScholarUtils.LOG_LEVELS['debug'])
-        ScholarConf.LOG_LEVEL = options.debug
-        ScholarUtils.log('info', 'using log level %d' % ScholarConf.LOG_LEVEL)
-
-    if options.version:
-        print('This is scholar.py %s.' % ScholarConf.VERSION)
-        return 0
-
-    if options.cookie_file:
-        ScholarConf.COOKIE_JAR_FILE = options.cookie_file
-
-    # Sanity-check the options: if they include a cluster ID query, it
-    # makes no sense to have search arguments:
-    if options.cluster_id is not None:
-        if options.author or options.allw or options.some or options.none \
-           or options.phrase or options.title_only or options.pub \
-           or options.after or options.before:
-            print('Cluster ID queries do not allow additional search arguments.')
-            return 1
+def get_pdfs_by_authors(authors, search_type='or'):
+    if search_type not in ['and', 'or']:
+        search_type = 'or'
 
     querier = ScholarQuerier()
-    settings = ScholarSettings()
+    authors = set(authors)
 
-    if options.citation == 'bt':
-        settings.set_citation_format(ScholarSettings.CITFORM_BIBTEX)
-    elif options.citation == 'en':
-        settings.set_citation_format(ScholarSettings.CITFORM_ENDNOTE)
-    elif options.citation == 'rm':
-        settings.set_citation_format(ScholarSettings.CITFORM_REFMAN)
-    elif options.citation == 'rw':
-        settings.set_citation_format(ScholarSettings.CITFORM_REFWORKS)
-    elif options.citation is not None:
-        print('Invalid citation link format, must be one of "bt", "en", "rm", or "rw".')
-        return 1
+    MAX_ENTRIES = 20
+    PAGE_LIMIT = 20
 
-    querier.apply_settings(settings)
+    search_results = {}
 
-    if options.cluster_id:
-        query = ClusterScholarQuery(cluster=options.cluster_id)
-    else:
+    for author in authors:
         query = SearchScholarQuery()
-        if options.author:
-            query.set_author(options.author)
-        if options.allw:
-            query.set_words(options.allw)
-        if options.some:
-            query.set_words_some(options.some)
-        if options.none:
-            query.set_words_none(options.none)
-        if options.phrase:
-            query.set_phrase(options.phrase)
-        if options.title_only:
-            query.set_scope(True)
-        if options.pub:
-            query.set_pub(options.pub)
-        if options.after or options.before:
-            query.set_timeframe(options.after, options.before)
-        if options.no_patents:
-            query.set_include_patents(False)
-        if options.no_citations:
-            query.set_include_citations(False)
+        query.set_author(author)
+        search_results[author] = []
 
-    if options.count is not None:
-        options.count = min(options.count, ScholarConf.MAX_PAGE_RESULTS)
-        query.set_num_page_results(options.count)
+        for i in range(max(0, (MAX_ENTRIES-1)//PAGE_LIMIT)+1):
+            query.set_start(i * PAGE_LIMIT)
+            querier.send_query(query)
 
-    querier.send_query(query)
+            for article in querier.articles:
+                if article['url_pdf'] is not None:
+                    cluster_id = article['cluster_id']
+                    url_pdf = article['url_pdf']
+                    search_results[author].append((cluster_id, url_pdf))
+            if len(querier.articles) < PAGE_LIMIT:
+                break
 
-    if options.csv:
-        csv(querier)
-    elif options.csv_header:
-        csv(querier, header=True)
-    elif options.citation is not None:
-        citation_export(querier)
-    else:
-        txt(querier, with_globals=options.txt_globals)
+    return search_results
 
-    if options.cookie_file:
-        querier.save_cookies()
-
-    return 0
 
 if __name__ == "__main__":
-    sys.exit(main())
+    results = get_pdfs_by_authors(["WATANABE", "SATO", "TANAKA"])
+    print(results)
