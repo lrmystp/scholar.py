@@ -977,11 +977,10 @@ def get_pdfs_by_authors(authors, num_entries=20):
     if num_entries < 0:
         num_entries = 0
 
+    MAX_PAGE_RESULTS = ScholarConf.MAX_PAGE_RESULTS
+
     querier = ScholarQuerier()
     authors = set(authors)
-
-    MAX_ENTRIES = 20
-    PAGE_LIMIT = 20
 
     search_results = {}
 
@@ -990,8 +989,8 @@ def get_pdfs_by_authors(authors, num_entries=20):
         query.set_author(author)
         search_results[author] = []
 
-        for i in range(max(0, (MAX_ENTRIES-1)//PAGE_LIMIT)+1):
-            query.set_start(i * PAGE_LIMIT)
+        for i in range((num_entries-1) // MAX_PAGE_RESULTS + 1):
+            query.set_start(i * MAX_PAGE_RESULTS)
             querier.send_query(query)
 
             for article in querier.articles:
@@ -999,7 +998,7 @@ def get_pdfs_by_authors(authors, num_entries=20):
                     cluster_id = article['cluster_id']
                     url_pdf = article['url_pdf']
                     search_results[author].append((cluster_id, url_pdf))
-            if len(querier.articles) < PAGE_LIMIT:
+            if len(querier.articles) < MAX_PAGE_RESULTS:
                 break
 
     return search_results
