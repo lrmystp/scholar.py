@@ -969,29 +969,28 @@ class ScholarQuerier(object):
             return None
 
 
-def get_pdfs_by_authors(authors, num_entries=20, search_type='or'):
+def get_articles_by_authors(authors, num_entries=20):
     '''
-    authors: 著者名のリスト
-    num_entries: 各著者について、検索して持ってくるエントリー数
-    search_type: 検索方式(and(AND検索)かor(OR検索))
-    -> 著者名がauthorsに含まれるPDFへのURLのリスト
+    params:
+        authors: 著者名のリスト
+        num_entries: 各著者について、検索して持ってくるエントリー数
+    returns:
+        key: 著者名, value: 論文のリスト
+        となる辞書
     '''
     if num_entries < 0:
         num_entries = 0
-    if search_type not in ['or', 'and']:
-        search_type = 'or'
 
     MAX_PAGE_RESULTS = ScholarConf.MAX_PAGE_RESULTS
 
     querier = ScholarQuerier()
-    authors = set(authors)
 
-    search_results = {}
+    search_result = {}
 
     for author in authors:
         query = SearchScholarQuery()
         query.set_author(author)
-        search_results[author] = set()
+        search_result[author] = []
 
         for i in range((num_entries-1) // MAX_PAGE_RESULTS + 1):
             query.set_start(i * MAX_PAGE_RESULTS)
@@ -999,22 +998,21 @@ def get_pdfs_by_authors(authors, num_entries=20, search_type='or'):
 
             for article in querier.articles:
                 if article['url_pdf'] is not None:
-                    cluster_id = article['cluster_id']
-                    url_pdf = article['url_pdf']
-                    search_results[author].add(url_pdf)
+                    new_article = {}
+                    new_article['title'] = article['title']
+                    new_article['year'] = article['year']
+                    new_article['num_citations'] = article['num_citations']
+                    new_article['num_versions'] = article['num_versions']
+                    new_article['url_pdf'] = article['url_pdf']
+
+                    search_result[author].append(new_article)
+
             if len(querier.articles) < MAX_PAGE_RESULTS:
                 break
 
-    if search_type == 'or':
-        def reduce_func(x, y):
-            return x | y
-    elif search_type == 'and':
-        def reduce_func(x, y):
-            return x & y
-
-    return list(functools.reduce(reduce_func, search_results.values()))
+    return search_result
 
 
 if __name__ == "__main__":
-    results = get_pdfs_by_authors(["WATANABE", "SATO", "TANAKA"])
+    results = get_articles_by_authors(["WATANABE", "SATO", "TANAKA"])
     print(results)
