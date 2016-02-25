@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #! /usr/bin/env python
 
 # Copyright 2010--2014 Christian Kreibich. All rights reserved.
@@ -975,7 +976,7 @@ def get_articles_by_authors(authors, num_entries=20):
         authors: 著者名のリスト
         num_entries: 各著者について、検索して持ってくるエントリー数
     returns:
-        key: 著者名, value: 論文のリスト
+        key: 著者名, value: 論文のリスト(要素数: num_entries)
         となる辞書
     '''
     if num_entries < 0:
@@ -992,8 +993,10 @@ def get_articles_by_authors(authors, num_entries=20):
         query.set_author(author)
         search_result[author] = []
 
-        for i in range((num_entries-1) // MAX_PAGE_RESULTS + 1):
-            query.set_start(i * MAX_PAGE_RESULTS)
+        start = 0
+        while len(search_result[author]) < num_entries:
+            print("query")
+            query.set_start(start)
             querier.send_query(query)
 
             for article in querier.articles:
@@ -1009,6 +1012,8 @@ def get_articles_by_authors(authors, num_entries=20):
 
             if len(querier.articles) < MAX_PAGE_RESULTS:
                 break
+
+            start += MAX_PAGE_RESULTS
 
     return search_result
 
